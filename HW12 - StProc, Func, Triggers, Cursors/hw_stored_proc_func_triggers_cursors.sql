@@ -121,7 +121,7 @@ RETURN
 	FROM [Warehouse].[StockItems]	AS [SI]
 	JOIN [Sales].[OrderLines]		AS [OL] ON [SI].[StockItemID] = [OL].[StockItemID]
 	JOIN [Sales].[Orders]			AS [SO] ON [OL].[OrderID] = [SO].[OrderID]
-	WHERE [SO].[CustomerID] = 149
+	WHERE [SO].[CustomerID] = @customerId
 	GROUP BY [SO].[CustomerID], [SI].[StockItemName]
 	ORDER BY [PurchasedItemsCount] DESC
 )
