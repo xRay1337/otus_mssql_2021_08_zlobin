@@ -1,66 +1,51 @@
 /*Итоги:
-	Удалось сократить колличество чтений таблицы Invoices в 7 раз(это пожалуй главная заслуга), в время работы процессора в 3 раза
-	За счёт выноса подзапросов во временную таблицу с последующей индексацией имеем прирост производительности
-	Закомментированы ненужные джоины и сортировка
+	Сократилось количество чтений таблицы Invoices в 7 раз(это пожалуй главная заслуга), а время работы процессора в 9 раз
+	За счёт выноса 1го подзапроса во временную таблицу имеем прирост производительности(с CTE заметно хуже)
+	Вместо 2го подзапроса сделал джоин с Warehouse.StockItems
+	Удалил ненужные джоины(JOIN CustomerTransactions и JOIN StockItemTransactions) и сортировку(ORDER BY ord.CustomerID, det.StockItemID)
 	Условие "DATEDIFF(DAY, Inv.InvoiceDate, ord.OrderDate) = 0" заменено "Inv.InvoiceDate = ord.OrderDate" - исключено лишнее вычисление
-	COUNT(ord.OrderID) заменён на COUNT(*) - думаю в этом есть небольшой прирост
-	Повысилась удобочитаемость, результаты темповых таблиц можно переиспользовать в будущем
+	COUNT(ord.OrderID) заменён на COUNT(*) - думаю в этом есть небольшой прирост, т.к. не требуется проверка на NULL
+	Заметно повысилась удобочитаемость
 */
 
 SET STATISTICS IO, TIME ON
 
-DROP TABLE IF EXISTS #totalSales
-DROP TABLE IF EXISTS #StockItemsIdBySupplierId
+DROP TABLE IF EXISTS #CustomersId
 
 
-SELECT	CustomerID,
-		SUM(Total.UnitPrice * Total.Quantity) AS Total
-INTO #TotalSales
-FROM Sales.OrderLines	AS Total
-JOIN Sales.Orders		AS OrdTotal ON OrdTotal.OrderID = Total.OrderID
+SELECT CustomerID
+INTO #CustomersId
+FROM Sales.Orders		AS O
+JOIN Sales.OrderLines	AS OL ON O.OrderID = OL.OrderID
 GROUP BY CustomerID
-HAVING SUM(Total.UnitPrice * Total.Quantity) > 250000
-
-CREATE CLUSTERED INDEX IDX_CustomerID ON #TotalSales(CustomerID) --вынес расчёт в темповую таблицу, т.к. в табличной в переменной нужно сразу индекс указывать, что замедляет вставку, поэтому заполняю кучу, а потом соритрую
+HAVING SUM(OL.UnitPrice * OL.Quantity) > 250000
 
 
-SELECT DISTINCT StockItemID
-INTO #StockItemsIdBySupplierId
-FROM Warehouse.StockItems
-WHERE SupplierId = 12
-
-CREATE CLUSTERED INDEX IDX_StockItemID ON #StockItemsIdBySupplierId(StockItemID) --вынес расчёт в темповую таблицу, т.к. в табличной переменной нужно сразу индекс указывать, что замедляет вставку, поэтому заполняю кучу, а потом соритрую
-
-
-SELECT	ord.CustomerID,
-		det.StockItemID,
-		SUM(det.UnitPrice),
-		SUM(det.Quantity),
-		COUNT(*) --ord.OrderID NOT NULL, поэтому можно считать *, а не проверять каждый раз поле на NULL
-FROM #TotalSales						AS ordTotal
-JOIN Sales.Orders						AS ord		 ON ordTotal.CustomerID = ord.CustomerID
-JOIN Sales.OrderLines					AS det		 ON det.OrderID = ord.OrderID
-JOIN #StockItemsIdBySupplierId			AS It		 ON It.StockItemID = det.StockItemID
-JOIN Sales.Invoices						AS Inv		 ON Inv.OrderID = ord.OrderID
-/*Неиспользуемые джоины, если нужны, то раскомментировать
-JOIN Sales.CustomerTransactions			AS Trans	 ON Trans.InvoiceID = Inv.InvoiceID
-JOIN Warehouse.StockItemTransactions	AS ItemTrans ON ItemTrans.StockItemID = det.StockItemID
-*/
-WHERE Inv.InvoiceDate = ord.OrderDate --Вместо DATEDIFF(DAY, Inv.InvoiceDate, ord.OrderDate) = 0. Лишнее вычисление, типы данных совпадают
-	AND Inv.BillToCustomerID <> ord.CustomerID
-GROUP BY ord.CustomerID, det.StockItemID
---ORDER BY ord.CustomerID, det.StockItemID --Не ясно, нужна ли сортировка, если нужна, то раскомментировать
+SELECT	O.CustomerID,
+		OL.StockItemID,
+		SUM(OL.UnitPrice)	AS UnitPrice,
+		SUM(OL.Quantity)	AS Quantity,
+		COUNT(*)			AS OrdersCount
+FROM #CustomersId						AS CI
+JOIN Sales.Orders						AS O	ON CI.CustomerID = O.CustomerID
+JOIN Sales.OrderLines					AS OL	ON O.OrderID = OL.OrderID
+JOIN Sales.Invoices						AS I	ON O.OrderID = I.OrderID
+JOIN Warehouse.StockItems				AS SI	ON OL.StockItemID = SI.StockItemID
+WHERE O.OrderDate = I.InvoiceDate
+	AND O.CustomerID <> I.BillToCustomerID
+	AND SI.SupplierId = 12
+GROUP BY O.CustomerID, OL.StockItemID
 
 --3 619
 
 /*Было
 
-Таблица "StockItemTransactions".	Число просмотров 1, логических чтений 0, физических чтений 0.
-Таблица "OrderLines".				Число просмотров 4, логических чтений 0, физических чтений 0.
-Таблица "CustomerTransactions".		Число просмотров 5, логических чтений 261, физических чтений 4.
 Таблица "Orders".					Число просмотров 2, логических чтений 883, физических чтений 4.
+Таблица "OrderLines".				Число просмотров 4, логических чтений 0, физических чтений 0.
 Таблица "Invoices".					Число просмотров 1, логических чтений 76422, физических чтений 2.
 Таблица "StockItems".				Число просмотров 1, логических чтений 2, физических чтений 1.
+Таблица "CustomerTransactions".		Число просмотров 5, логических чтений 261, физических чтений 4.
+Таблица "StockItemTransactions".	Число просмотров 1, логических чтений 0, физических чтений 0.
 
 Время ЦП = 937 мс, затраченное время = 4502 мс.
 
@@ -68,17 +53,15 @@ GROUP BY ord.CustomerID, det.StockItemID
 
 /*Стало
 
-Таблица "OrderLines".					Число просмотров 2, логических чтений 0, физических чтений 0.
-Таблица "Orders".						Число просмотров 1, логических чтений 191, физических чтений 1.
+Таблица "Orders".								Число просмотров 1, логических чтений 191, физических чтений 0.
+Таблица "OrderLines".							Число просмотров 2, логических чтений 0, физических чтений 0.
 
-Таблица "StockItems".					Число просмотров 1, логических чтений 2, физических чтений 1.
+Таблица "#CustomerIdWithTotalSalesOverValue".	Число просмотров 5, логических чтений 1, физических чтений 0.
+Таблица "Orders".								Число просмотров 5, логических чтений 725, физических чтений 0.
+Таблица "OrderLines".							Число просмотров 8, логических чтений 0, физических чтений 0.
+Таблица "Invoices".								Число просмотров 5, логических чтений 11994, физических чтений 0.
+Таблица "StockItems".							Число просмотров 1, логических чтений 2, физических чтений 0.
 
-Таблица "#StockItemsIdBySupplierId".	Число просмотров 1, логических чтений 2, физических чтений 0.
-Таблица "OrderLines".					Число просмотров 8, логических чтений 0, физических чтений 0.
-Таблица "Orders".						Число просмотров 5, логических чтений 725, физических чтений 3.
-Таблица "#totalSales".					Число просмотров 5, логических чтений 7, физических чтений 0.
-Таблица "Invoices".						Число просмотров 5, логических чтений 11580, физических чтений 3.
-
-Время ЦП = 344 мс, затраченное время = 3216 мс.
+Время ЦП = 109 мс, затраченное время = 278 мс.
 
 */
