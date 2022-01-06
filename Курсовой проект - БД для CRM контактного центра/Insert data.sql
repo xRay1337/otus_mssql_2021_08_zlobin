@@ -122,12 +122,15 @@ VALUES	('merinoviv', N'Меринов', N'Иван', N'Владимирович', 1, '20211106'),			--1
 
 		('besedinala', N'Беседина', N'Людмила', N'Александровна', 4, '20211106'),	--6
 		('solovyovaoa', N'Соловьёва', N'Оксана', N'Антоновна', 5, '20211106'),		--7
+		('ilinmm', N'Ильин', N'Михаил', N'Михайлович', 5, '20211106'),				--8
 
-		('volkovalp', N'Волкова', N'Лариса', N'Петровна', 4, '20211106'),			--8
-		('alekseevvi', N'Алексеев', N'Владимир', N'Иванович', 5, '20211106'),		--9
+		('volkovalp', N'Волкова', N'Лариса', N'Петровна', 4, '20211106'),			--9
+		('alekseevvi', N'Алексеев', N'Владимир', N'Иванович', 5, '20211106'),		--10
+		('raskinvv', N'Ряскин', N'Владимир', N'Викторович', 5, '20211106'),			--11
 
-		('podlipalinamn', N'Подлипалина', N'Марина', N'Николаевна', 4, '20211106'),	--10
-		('sherbenevamv', N'Щербенева', N'Марина', N'Валерьевна', 5, '20211106')		--11
+		('podlipalinamn', N'Подлипалина', N'Марина', N'Николаевна', 4, '20211106'),	--12
+		('sherbenevamv', N'Щербенева', N'Марина', N'Валерьевна', 5, '20211106'),	--13
+		('pigusmi', N'Пигус', N'Максим', N'Игоревич', 5, '20211106')				--14
 
 GO
 
@@ -165,10 +168,13 @@ GO
 INSERT INTO [Organization].[CRM].[Operators]([OperatorEmployeeId], [OperatorRoleId], [OperatorGroupId])
 VALUES	(6, 4, 1),
 		(7, 4, 1),
-		(8, 4, 2),
+		(8, 4, 1),
 		(9, 4, 2),
-		(10, 4, 3),
-		(11, 4, 3)
+		(10, 4, 2),
+		(11, 4, 2),
+		(12, 4, 3),
+		(13, 4, 3),
+		(14, 4, 3)
 
 GO
 
@@ -299,18 +305,21 @@ DECLARE @nextActionDT DATETIME2
 WHILE @i < 1000
 BEGIN
 	SET @i += 1
+	SET @nextActionDT = NULL
 
-	SET @operatorId = (@i % @maxOperatorId) + 1
-	SET @clientId = (@i % @maxClientId) + 1
-	SET @resultId = (@i % @maxResultId) + 1
+	SET @operatorId = 1 + CONVERT(INT, (@maxOperatorId) * RAND())
+	SET @clientId = 1 + CONVERT(INT, (@maxClientId) * RAND())
+	SET @resultId = 1 + CONVERT(INT, (@maxResultId) * RAND())
 
 	IF @resultId = 3 SET @nextActionDT = DATEADD(DAY, 1, FORMAT(SYSDATETIME(), 'yyy-MM-dd'))
 	IF @resultId = 4 SET @nextActionDT = DATEADD(HOUR, 2, SYSDATETIME())
 
-	INSERT INTO [Organization].[CRM].[Contacts]([OperatorId], [ClientId], [ResultId], [NextActionDT])
-	VALUES(@operatorId, @clientId, @resultId, @nextActionDT)
-
 	EXEC CRM.AddContact @operatorId = @operatorId, @clientId = @clientId, @resultId = @resultId, @nextActionDT = @nextActionDT
-
-	SET @nextActionDT = NULL
 END
+
+/*
+DECLARE @Upper INT = 1;     /* -- The lowest random number */
+DECLARE @Lower INT = 49;    /* -- The highest random number */
+    
+SELECT @Lower + CONVERT(INT, (@Upper-@Lower+1)*RAND());
+*/
